@@ -1,0 +1,932 @@
+<!DOCTYPE HTML>
+<html>
+	<head>
+	  <meta charset="utf-8"/>
+	  
+	  <script id="vOrbitShader" type="x-shader/x-vertex">
+
+      attribute float a_angle;
+      
+      uniform float u_length;
+      uniform float u_height;
+      uniform float u_offset;
+
+      uniform mat4 u_mvp;
+
+      void main() {
+        vec3 pos = vec3(sin(a_angle) * u_height, cos(a_angle) * u_length,0.0);
+        pos.y += u_offset;
+      
+        // Multiply the position by the matrix.
+        gl_Position = u_mvp * vec4(pos, 1.0);
+
+      }
+    </script>
+    <!-- fragment shader -->
+    <script id="fOrbitShader" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform vec4 u_color;
+
+      void main() {
+         gl_FragColor = u_color;//vec4(1.0,1.0,1.0,1.0)
+      }
+    </script>
+	  
+	  <script id="vSkyShader" type="x-shader/x-vertex">
+      attribute vec3 a_pos;
+      attribute vec2 a_texCoord;
+
+      uniform mat4 u_mvp;
+
+      varying vec2 v_texCoord;
+
+      void main() {
+        // Multiply the position by the matrix.
+        gl_Position = u_mvp * vec4(a_pos, 1.0);
+
+        // Pass the texcoord to the fragment shader.
+        v_texCoord = a_texCoord;
+      }
+    </script>
+    <!-- fragment shader -->
+    <script id="fSkyShader" type="x-shader/x-fragment">
+      precision mediump float;
+
+      // Passed in from the vertex shader.
+      varying vec2 v_texCoord;
+
+      uniform sampler2D u_texture;
+
+      void main() {
+         gl_FragColor = texture2D(u_texture, v_texCoord);// + vec4(1,0,0,1);
+      }
+    </script>
+	  
+	  <script id="vRingShader" type="x-shader/x-vertex">
+	    uniform mat4    u_mvp;
+	    uniform float   u_length;
+	    attribute vec3  a_pos;
+	    varying vec3    v_pos;
+	    
+	    void main()
+	    {
+	      gl_Position = u_mvp * vec4(a_pos * u_length,1.0);
+	      v_pos = a_pos;
+	    }
+	  </script>
+	  <script id="fRingShader" type="x-shader/x-fragment">
+	    precision mediump float;
+	    
+
+      //uniform vec3      u_light;
+      uniform float     u_start;  //distance start of ring texture
+      uniform sampler2D u_color;
+      varying vec3    v_pos;
+      
+      
+	    void main()
+	    {
+	      float d = length(v_pos) - u_start;
+	      
+	      
+	      vec4 color = texture2D(u_color, vec2(d/(1.0-u_start), 0.5));
+	      
+	      if(color.a == 0.0)
+	        discard;
+	      
+        gl_FragColor = color;
+	    }
+	  </script>
+	  
+	  <script id="vStarShader" type="x-shader/x-vertex">
+	    uniform mat4    u_mvp;
+	    attribute vec3  a_pos;
+	    void main()
+	    {
+	      gl_Position = u_mvp * vec4(a_pos,1.0);
+	    }
+	  </script>
+	  <script id="fStarShader" type="x-shader/x-fragment">
+	    precision mediump float;
+	    
+	    uniform vec2 u_pos;
+      uniform vec3 u_color;
+      uniform vec3 u_colorBorder;
+      uniform float u_lineWidth;
+      uniform float u_radius;
+      uniform float u_gamma;
+      uniform sampler2D u_dither;
+	    void main()
+	    {
+	      float rnd = texture2D(u_dither, gl_FragCoord.xy / 8.0).r / 32.0 - (1.0 / 128.0);
+	      
+	      vec2 t = u_pos - gl_FragCoord.xy;
+        float dist = sqrt(dot(t,t));
+  
+        //inner alpha
+        float alpha = 1.0 - max(dist - u_radius,0.0) / u_lineWidth;
+        float d = max((dist - u_radius) / u_lineWidth,0.0) + 1.0;
+        
+        float alphaFill = alpha;
+
+        float alphaBorder = 1.0 - alpha;
+        
+        alpha = 1.0 / (d *d *d);
+        
+        vec3 colorFill = pow(u_color, vec3(u_gamma)) * alphaFill;
+        vec3 colorBorder = pow(u_colorBorder, vec3(u_gamma)) * alphaBorder;
+  
+        vec3 color = pow(colorFill + colorBorder, vec3(1.0/u_gamma));
+
+        gl_FragColor = vec4(color, alpha + rnd);
+	    }
+	  </script>
+	  
+	  <script id="vAtmosphereHighShader" type="x-shader/x-vertex">
+	    attribute vec3 a_pos;
+      uniform mat4 u_mvp;
+      //uniform mat4 u_mv;  //model view
+      uniform vec2 u_size;
+      varying vec3    v_normal;
+      varying vec4    v_point;  //point view space
+      void main(void)
+      {
+        vec3 a = a_pos * vec3(u_size.x, u_size.x, u_size.y);
+        gl_Position = u_mvp * vec4(a, 1.0);
+        v_normal = a_pos;
+        v_point = vec4(a, 1.0);//u_mv * 
+      }
+    </script>
+    
+	  <script id="fAtmosphereHighShader" type="x-shader/x-fragment">
+      precision mediump float;
+      uniform vec4    u_color;
+      uniform vec3    u_light;
+      uniform vec3    u_camera;         //camera position relative to planet/object
+      uniform float   u_outerRadius;		// The outer (atmosphere) radius
+      uniform float   u_innerRadius;		// The inner (planetary) radius
+      uniform float   u_ambient;
+      uniform float   u_sunIntensity;
+      uniform vec3    u_rayleighWavelength;//  	= vec3(5.8e-4, 1.35e-3, 3.31e-3);
+      uniform vec3    u_mieWavelength;// 		  	= vec3(4.0e-3, 4.0e-3, 4.0e-3);
+      uniform float   u_heightScaleRayleigh;// = 8.0;
+      uniform float   u_heightScaleMie;// = 1.2;
+      uniform float   u_g;// = -0.76;
+      varying vec3    v_normal;
+      varying vec4    v_point;  //point view space
+      
+      
+      
+      #define M_MAX 1e9
+      
+      const float M_PI = 3.1415926535;
+      const float M_4PI = 4.0 * M_PI;
+      const float AU_TO_KM = 149597870.7;
+      
+      
+      const float NUM_DENSITY_SAMPLES = 4.0;
+      const float NUM_VIEW_SAMPLES = 4.0;
+      const int 	INT_NUM_DENSITY_SAMPLES = 4;
+      const int	  INT_NUM_VIEW_SAMPLES = 4;
+      
+      //radius of the circle and point with direction
+      vec2 RaySphere(vec3 a_point, vec3 a_ray, float a_radius)
+      {
+        float b = 2.0 * dot(a_point, a_ray);
+        float c = dot(a_point, a_point) - a_radius * a_radius;
+        float det = b*b - 4.0 * c;
+        if(det < 0.0) return vec2(-M_MAX, -M_MAX);
+        float near = 0.5 * (-b - sqrt(det));
+        float far = 0.5 * (-b + sqrt(det));
+  
+        return vec2(near,far);   
+      }
+      
+      ///////////////////////////////////////
+      // Henyey-Greenstein phase function
+      float phase(float a_nu, float a_g)
+      {
+        float g2 = a_g * a_g;
+        return (3.0 * (1.0 - g2) * (1.0 + a_nu * a_nu)) / (2.0 * (2.0 + g2) * pow(1.0 + g2 - 2.0 * a_g * a_nu, 1.5));
+      }
+
+      ///////////////////////////////////////
+      // density integral calculation from p0 to p1 
+      // for mie and rayleight
+      vec2 densityOverPath(vec3 a_p0, vec3 a_p1, vec2 a_prescaler, float a_innerRadius)
+      {
+        float l = length(a_p1 - a_p0);
+        vec3  v = (a_p1 - a_p0) / l;
+
+        l /= NUM_DENSITY_SAMPLES;
+
+        vec2 density = vec2(0.0);
+        float t = 0.0;
+
+        for(int i = 0; i < INT_NUM_DENSITY_SAMPLES; i++)
+        {
+          vec3 sp = a_p0 + v * (t + 0.5 * l);
+          vec2 h = vec2(length(sp) - a_innerRadius);
+          density += exp(-h / a_prescaler);
+
+          t += l;
+        }
+
+        return l * density;
+      }
+      
+      //a_cam camera position relative to planet/object
+      //a_v   ray
+      //a_sun light vector
+      vec4 Scatter(vec3 a_cam, vec3 a_v, vec3 a_sun, float a_innerRadius, float a_outerRadius)
+      {
+        vec3 M_4PIbetaR	 	  = M_4PI * u_rayleighWavelength;
+        vec3 M_4PIbetaM 		= M_4PI * u_mieWavelength;
+      
+        vec2 t0 = RaySphere(a_cam, a_v, a_outerRadius);
+        vec2 t1 = RaySphere(a_cam, a_v, a_innerRadius);
+
+        bool bNoPlanetIntersection = t1.x < 0.0 && t1.y < 0.0;
+
+        float farPoint = bNoPlanetIntersection ? t0.y : t1.x;
+        //float nearPoint = t0.x > 0.0 ? t0.x : 0.0;
+        float nearPoint = max(t0.x, 0.0);
+        
+        float len = farPoint - nearPoint;
+        float l = (len) / NUM_VIEW_SAMPLES; //length segments
+        
+        //move a_cam to atmosphere or keep at current position if in atmosphere
+        a_cam += nearPoint * a_v;  
+
+        float t = 0.0;
+
+        vec3 rayleight = vec3(0.0);
+        vec3 mie = vec3(0.0);
+
+        vec2 prescalers = vec2(u_heightScaleRayleigh, u_heightScaleMie);
+
+        vec2 densityPointToCam = vec2(0.0);
+        
+        //float exti = 1.0;
+
+        for(int i = 0; i < INT_NUM_VIEW_SAMPLES; i++)
+        {
+          //point along ray
+          vec3 sp = a_cam + a_v * (t + 0.5 * l);
+          
+          //get distance to edge of atmosphere
+          float tc = RaySphere(sp, a_sun, a_outerRadius).y;
+
+          //point to end of atmos
+          vec3 pc = sp + tc * a_sun;
+
+          vec2 densitySPCam = densityOverPath(sp, a_cam, prescalers, a_innerRadius);
+          vec2 densities = densityOverPath(sp, pc, prescalers, a_innerRadius) + densitySPCam;
+
+          vec2 h = vec2(length(sp) - a_innerRadius);
+          vec2 expRM = exp(-h / prescalers);
+
+          rayleight 	+= expRM.x * exp( -M_4PIbetaR * densities.x );
+          mie 		+= expRM.y * exp( -M_4PIbetaM * densities.y );
+
+          densityPointToCam += densitySPCam;
+          
+          //exti *= exp( -ExtinctionCoeff * l );
+
+          t += l;
+        }
+    
+        rayleight *= l;
+        mie *= l;
+
+        vec3 extinction = exp( - (M_4PIbetaR * densityPointToCam.x + M_4PIbetaM * densityPointToCam.y));
+
+        float nu = dot(a_sun, -a_v);
+
+        vec3 inscatter = u_sunIntensity * (u_mieWavelength * mie * phase(nu, u_g) + 
+          u_rayleighWavelength * phase(nu, 0.0) * rayleight);
+          
+        float bo = bNoPlanetIntersection ? 1.0 : 0.0;
+          
+        float alpha = dot(extinction, vec3(0.33333333, 0.33333333, 0.33333333));//dot(extinction, vec3(0.33333333, 0.33333333, 0.33333333));
+        //alpha = extinction.b;
+        return vec4(inscatter, 1.0-alpha*alpha );//vec3(1.0)
+      }
+      
+
+      void main(void)
+      {
+        vec3 p = normalize(v_normal) * u_outerRadius;
+        
+        vec4 c = Scatter(u_camera * AU_TO_KM, normalize(p - u_camera), u_light,           //vec3(v_point)
+          u_innerRadius * AU_TO_KM, u_outerRadius * AU_TO_KM);
+        c.rgb = pow(c.rgb, vec3(1.0 / 2.2));
+        c.rgb = clamp(c.rgb, 0.0, 1.0);
+        
+        
+        gl_FragColor = c;
+      }
+    </script>
+    
+    <script id="vAtmosphereMediumShader" type="x-shader/x-vertex">
+	    attribute vec3 a_pos;
+      uniform mat4 u_mvp;
+      uniform mat4 u_mv;  //model view
+      uniform vec2 u_size;
+      varying vec3    v_normal;
+      varying vec4    v_point;  //point view space
+      void main(void)
+      {
+        vec3 a = a_pos * vec3(u_size.x, u_size.x, u_size.y);
+        gl_Position = u_mvp * vec4(a, 1.0);
+        v_normal = a_pos;
+        v_point = vec4(a, 1.0);//u_mv * 
+      }
+    </script>
+    
+	  <script id="fAtmosphereMediumShader" type="x-shader/x-fragment">
+      precision mediump float;
+      uniform vec3    u_colorHigh;  //color of atmosphere closest to light
+      uniform vec3    u_colorLow;   //color of atmosphere at ground level
+      uniform vec3    u_colorFar;   //color when light travels further than atmosphere height. ie sunrise/sunset
+      uniform vec4    u_color;      //color of atmosphere particles (ie dust) alpha represents density
+      uniform vec3    u_light;
+      uniform vec3    u_camera;
+      uniform float   u_density;
+      uniform float   u_pressure;   //pressure
+      uniform float   u_rtg;        //1 over R(specific gas constant)*T(temp)/g
+      uniform float   u_rt;         //1 over R/T
+      uniform float   u_outerRadius;		// The outer (atmosphere) radius
+      uniform float   u_innerRadius;		// The inner (planetary) radius
+      uniform float   u_ambient;
+      uniform float   u_sunIntensity;
+      varying vec3    v_normal;
+      varying vec4    v_point;  //point view space
+      
+      
+      
+      #define M_MAX 1e9
+      
+      const float M_PI = 3.1415926535;
+      const float M_4PI = 4.0 * M_PI;
+      const float AU_TO_KM = 149597870.7;
+      
+      
+      const float NUM_DENSITY_SAMPLES = 4.0;
+      const float NUM_VIEW_SAMPLES = 4.0;
+      const int 	INT_NUM_DENSITY_SAMPLES = 4;
+      const int	  INT_NUM_VIEW_SAMPLES = 4;
+      
+      //radius of the circle and point with direction
+      vec2 RaySphere(vec3 a_point, vec3 a_ray, float a_radius)
+      {
+        float b = 2.0 * dot(a_point, a_ray);
+        float c = dot(a_point, a_point) - a_radius * a_radius;
+        float det = b*b - 4.0 * c;
+        if(det < 0.0) return vec2(-M_MAX, -M_MAX);
+        float near = 0.5 * (-b - sqrt(det));
+        float far = 0.5 * (-b + sqrt(det));
+  
+        return vec2(near,far);   
+      }
+      
+
+
+      void main(void)
+      {
+        vec3 cam = u_camera * AU_TO_KM;
+        vec3 ray = normalize(vec3(v_point) - u_camera);
+        float innerRadius = u_innerRadius * AU_TO_KM;
+        float outerRadius = u_outerRadius * AU_TO_KM
+        
+        vec2 t0 = RaySphere(cam, ray, outerRadius);
+        vec2 t1 = RaySphere(cam, ray, innerRadius);
+        
+        vec3 color = vec3(0.0,0.0,0.0);
+        
+        
+        float density = 0.0;
+
+        for(int i = 0; i < INT_NUM_VIEW_SAMPLES; i++)
+        {
+          float h;
+          float d = u_pressure * exp(-h*u_rtg)*u_rt;
+          
+          color += u_color
+          
+          density += d;
+          
+        }
+  
+        gl_FragColor = c;
+      }
+    </script>
+	  
+	  <script id="vAtmosphereShader" type="x-shader/x-vertex">
+      attribute vec3 a_pos;
+      uniform mat4 u_mvp;
+      uniform vec2 u_size;
+      varying vec3    v_normal;
+      void main(void)
+      {
+        vec3 a = a_pos * vec3(u_size.x, u_size.x, u_size.y);
+        gl_Position = u_mvp * vec4(a, 1.0);
+        v_normal = a_pos;
+      }
+    </script>
+    
+	  <script id="fAtmosphereShader" type="x-shader/x-fragment">
+      precision mediump float;
+      uniform vec4    u_color;
+      uniform vec3    u_light;
+      uniform vec3    u_camera;
+      //uniform vec2    u_screen;
+      uniform float    u_ambient;
+      uniform sampler2D u_dither;
+      varying vec3    v_normal;
+      
+      
+
+      void main(void)
+      {
+        //vec3 pointVec = 0;
+        //float d = dot(u_planetVec, u_planetVec) - dot(u_planetVec, pointVec);
+        //float length = 2.0 * sqrt(radius * radius - d);
+        
+        //vec2 pos = (gl_FragCoord.xy + vec2(1.0,1.0))* 0.5 * u_screen;
+        float rnd = texture2D(u_dither, gl_FragCoord.xy / 8.0).r / 32.0 - (1.0 / 128.0);
+
+        
+        float camera = (1.0 - u_color.a) * (1.0 - max(dot(u_camera,v_normal), 0.0) );
+        camera = camera * camera + u_color.a;
+        float light = (1.0 - u_ambient) * max(dot(u_light, v_normal),0.0) + u_ambient;
+        float diffuse = light * camera;
+        vec4 color = u_color;
+        color.a = diffuse + rnd;
+
+        gl_FragColor = color;
+      }
+    </script>
+    
+    <script id="vCloudShader" type="x-shader/x-vertex">
+      attribute vec3  a_pos;
+      attribute vec2  a_texCoord;
+      uniform mat4    u_mvp;
+      uniform vec2    u_size;
+      varying vec2    v_texCoord;
+      varying vec3    v_normal;
+      void main(void)
+      {
+        vec3 a = a_pos * vec3(u_size.x, u_size.x, u_size.y);
+        gl_Position = u_mvp * vec4(a, 1.0);
+        v_texCoord = a_texCoord;
+        v_normal = a_pos;
+      }
+    </script>
+    
+	  <script id="fCloudShader" type="x-shader/x-fragment">
+      precision mediump float;
+      
+      uniform sampler2D u_sampler;
+      uniform vec3      u_light;
+      uniform float     u_ambient;
+      uniform float     u_gamma;
+      varying vec2      v_texCoord;
+      varying vec3      v_normal;
+      
+      void main(void)
+      {
+        vec3 normal = normalize(v_normal);
+
+        float diffuse = (1.0 - u_ambient) * max(dot(u_light, normal),0.0) + u_ambient;
+        vec3 color = pow(texture2D(u_sampler, v_texCoord).xyz, vec3(u_gamma)) * diffuse;
+        gl_FragColor = vec4(pow(color, vec3(1.0/u_gamma)), color.r);
+      }
+    </script>
+	  
+	  <!-- Vertex shader program -->
+
+    <script id="vPlanetShader" type="x-shader/x-vertex">
+      attribute vec3  a_pos;
+      attribute vec2  a_texCoord;
+      uniform mat4    u_mvp;
+      uniform vec2    u_size;
+      varying vec2    v_texCoord;
+      varying vec3    v_normal;
+      void main(void)
+      {
+        vec3 a = a_pos * vec3(u_size.x, u_size.x, u_size.y);
+        gl_Position = u_mvp * vec4(a, 1.0);
+        v_texCoord = a_texCoord;
+        v_normal = a_pos;
+      }
+    </script>
+    
+	  <script id="fPlanetShader" type="x-shader/x-fragment">
+      precision mediump float;
+      
+      uniform sampler2D u_sampler;
+      uniform sampler2D u_specular;
+      uniform vec3      u_light;
+      uniform vec3      u_camera;
+      uniform float     u_ambient;
+      uniform float     u_gamma;
+      varying vec2      v_texCoord;
+      varying vec3      v_normal;
+      
+      void main(void)
+      {
+        
+        float invGamma = 1.0/u_gamma;
+        vec3 halfAngle = normalize(u_camera + u_light);
+        vec3 specularColor = vec3(1.0,1.0,1.0);
+        float specularDot = clamp(dot(normalize(v_normal), halfAngle), 0.0, 1.0);
+        float p = texture2D(u_specular, v_texCoord).r;
+        vec3 specular = specularColor * pow(specularDot, 256.0) * p;
+        
+        float diffuse = (1.0 - u_ambient) * max(dot(u_light, v_normal),0.0) + u_ambient;
+        
+        vec3 tex = pow(texture2D(u_sampler, v_texCoord).rgb, vec3(u_gamma));
+        vec3 color = clamp(diffuse * tex + specular,0.0, 1.0);
+        color = pow(color, vec3(invGamma));
+        gl_FragColor = vec4(color,1.0);
+      }
+    </script>
+
+    
+    
+
+	  <script id="vCircleShader" type="x-shader/x-vertex">
+	    uniform mat4    u_mvp;
+	    attribute vec3  a_pos;
+	    void main()
+	    {
+	      gl_Position = u_mvp * vec4(a_pos,1.0);
+	    }
+	  </script>
+	  <script id="fCircleShader" type="x-shader/x-fragment">
+	    precision mediump float;
+	    
+	    uniform vec2 u_pos;
+      uniform vec4 u_color;
+      uniform vec4 u_colorBorder;
+      uniform float u_lineWidth;
+      uniform float u_radius;
+	    void main()
+	    {
+	      vec2 t = u_pos - gl_FragCoord.xy;
+        float dist = sqrt(dot(t,t));
+  
+        //inner alpha
+        float alphaFill = clamp(1.0 + u_radius - dist, 0.0, 1.0);
+
+        float alphaBorder = clamp(min( dist - u_radius, u_radius + max(1.0, u_lineWidth) - dist), 0.0, 1.0);
+  
+        vec4 colorFill = u_color;
+        vec4 colorBorder = u_colorBorder;
+
+  
+        colorFill.a = alphaFill * colorFill.a;
+        colorBorder.a = alphaBorder * colorBorder.a;
+  
+        vec4 color = mix(colorFill, colorBorder, colorBorder.a);
+        gl_FragColor = color;
+	    }
+	  </script>
+	  
+	  <script id="vTextShader" type="x-shader/x-vertex">
+      attribute vec4 a_pos;
+      attribute vec2 a_texCoord;
+
+      uniform mat4 u_mvp;
+
+      varying vec2 v_texCoord;
+
+      void main() {
+        // Multiply the position by the matrix.
+        gl_Position = u_mvp * a_pos;
+
+        // Pass the texcoord to the fragment shader.
+        v_texCoord = a_texCoord;
+      }
+    </script>
+    <!-- fragment shader -->
+    <script id="fTextShader" type="x-shader/x-fragment">
+      precision mediump float;
+
+      // Passed in from the vertex shader.
+      varying vec2 v_texCoord;
+
+      uniform sampler2D u_texture;
+
+      void main() {
+         gl_FragColor = texture2D(u_texture, v_texCoord);// + vec4(1,0,0,1);
+      }
+    </script>
+    
+    <script id="vLineShader" type="x-shader/x-vertex">
+      attribute vec4 a_pos; //x,y,z, parent
+      attribute float a_index;
+
+      uniform mat4 u_mvp;
+      uniform vec2 u_index; //index, num
+      varying float v_alpha;
+
+      void main() {
+        // Multiply the position by the matrix.
+        gl_Position = u_mvp * vec4(a_pos.xyz, 1.0);
+        
+        v_alpha = mod(a_index - u_index.x + u_index.y, u_index.y)/u_index.y;
+      }
+    </script>
+    <!-- fragment shader -->
+    <script id="fLineShader" type="x-shader/x-fragment">
+      precision mediump float;
+
+      uniform vec3 u_color;
+      varying float v_alpha;
+
+      void main() 
+      {
+        
+         gl_FragColor = vec4(u_color, v_alpha);
+      }
+    </script>
+    
+    <script id="vFlatShader" type="x-shader/x-vertex">
+      attribute vec3 a_pos; //x,y,z
+      uniform mat4 u_mvp;
+
+      void main() {
+        // Multiply the position by the matrix.
+        gl_Position = u_mvp * vec4(a_pos, 1.0);
+      }
+    </script>
+    <!-- fragment shader -->
+    <script id="fFlatShader" type="x-shader/x-fragment">
+      precision mediump float;
+      uniform vec4 u_color;
+
+      void main() 
+      {
+         gl_FragColor = u_color;
+      }
+	  </script>
+	  
+		<script src="gl-matrix-min.js" type="text/javascript" ></script>
+    <script src="game.js" type="text/javascript" ></script>
+    
+		<link rel="stylesheet" type="text/css" href="game.css">
+	</head>
+	<body onload="External.Initialize();">
+	  <!--
+    <div id="navbar">
+	    
+        {{{navbar}}}
+      <table style="width:100%; text-align: center; table-layout: fixed;">
+        <tr>
+          <td><a href="/">Play</a></td>	
+          <td></td>		
+          <td><h1>nbody.space</h1> 
+          <td></td>	
+          <td><a href="about.html">About</a></td>
+        </tr>
+      </table>
+      
+	  </div>
+    -->
+	  
+	  <div id="version">
+	    Prototype Pre alpha v0.3.1
+	  </div>
+	  
+
+    <div class="menu settings" id="settings">
+      <div style="text-align: center;">
+        <button type="button" class="toggle" id="bSettings" onclick="External.ToggleSettings()">Settings</button>
+      </div>
+    
+      <p>Integration Method: 
+      <select id="sIntegration" class="selectbox" onchange="External.ChangeIntegration()">
+        <option value="0">Euler</option> 
+        <option value="1" selected>Verlet</option> 
+        <option value="2">Forest Ruth</option> 
+      </select>
+      
+    
+    
+      <br>
+      <div class="checkbox">
+        <input type="checkbox" value="1" id="cDrawlines" name="" onchange="External.DrawLines()" checked> 
+        <label for="cDrawlines">Draw Orbits</label>
+    
+        <br><input type="checkbox" class="checkbox" id="cOutlineObjects" onchange="External.DrawCircles()" checked> 
+        <label for="cOutlineObjects">Outline Objects</label>
+        
+        <br><input type="checkbox" class="checkbox" id="cDrawNames" onchange="External.DrawNames()" checked> 
+        <label for="cDrawNames">Draw Names</label>
+      </div>
+    
+    
+    
+    
+    </div>
+  
+    <div class="menu graphics" id="graphics">
+      <div style="text-align: center;">
+        <button type="button" class="toggle" id="bGraphics" onclick="External.ToggleGraphics()">Graphics</button>
+      </div>
+    
+      <p>
+      <div class="checkbox">
+        <input type="checkbox"  id="cVideoCard" alt="Draw planets using WebGL" checked> 
+        <label for="cVideoCard">Use Video Card</label>
+        <br><input type="checkbox"  id="cFancyUI" alt="Draw better looking Ui that is more resource intensive" checked>
+        <label for="cFancyUI">Fancy UI</label>
+        <br><input type="checkbox"  id="cDrawClouds" onchange="External.DrawClouds()" alt="Draw clouds over planets" checked>
+        <label for="cDrawClouds">Draw Clouds</label>
+      </div>
+      Atmospheric scattering: 
+      <select id="sAtmosphere" class="selectbox" onchange="External.DrawAtmosphere()">
+        <option value="0">Off</option> 
+        <option value="1">Low</option> 
+        <option value="2">Medium</option> 
+        <option value="3" selected>High</option>
+      </select>
+    </div>
+  
+    <div class="menu object" id="object">
+      <div style="text-align: center;">
+        <button type="button" class="toggle" id="bObject" onclick="External.ToggleObject()">Object</button>
+      </div>
+      <br><table style="width:100%">
+        <tr>
+          <td>Selected:</td>
+          <td><span id="spanSelected"></span></td> 
+        </tr>
+        <tr>
+          <td>Mass:</td>
+          <td><input type="text" id="textMass" onchange="External.ChangeMass()"></td> 
+          <td>kg</td> 
+        </tr>
+        <tr>
+          <td>Radius:</td>
+          <td><input type="text" id="textRadius" onchange="External.ChangeRadius()"></td> 
+          <td>km</td> 
+        </tr>
+        <tr>
+          <td>Temperature:</td>
+          <td><input type="text" id="textTemperature" onchange="External.ChangeTemperature()"></td> 
+          <td>K</td> 
+        </tr>
+        <tr>
+          <td>Age:</td>
+          <td><input type="text" id="textAge" onchange="External.ChangeAge()"></td> 
+          <td>Years</td> 
+        </tr>
+        <tr>
+          <td>Parent:</td>
+          <td><span id="spanParent"></span></td> 
+          <td></td>
+        </tr>
+        <tr>
+          <td>Orbital Period:</td>
+          <td><input type="text" id="textPeriod"></td> 
+          <td></td> 
+        </tr>
+        <tr>
+          <td>Velocity:</td>
+          <td><input type="text" id="textVelocity"></td> 
+          <td>km/s</td> 
+        </tr>
+        <tr>
+          <td>Distance:</td>
+          <td><input type="text" id="textDistance"></td> 
+          <td>km</td>
+        </tr>
+        <tr>
+          <td>Periapsis:</td>
+          <td><input type="text" id="textPeriapsis"></td> 
+          <td>km</td> 
+        </tr>
+        <tr>
+          <td>Apoapsis:</td>
+          <td><input type="text" id="textApoapsis"></td> 
+          <td>km</td> 
+        </tr>
+        <tr>
+          <td>Semimajor axis:</td>
+          <td><input type="text" id="textSemimajorAxis"></td> 
+          <td>km</td> 
+        </tr>
+        <tr>
+          <td>Eccentricity:</td>
+          <td><input type="text" id="textEccentricity"></td> 
+          <td></td> 
+        </tr>
+        <tr>
+          <td>Inclination:</td>
+          <td><input type="text" id="textInclination"></td> 
+          <td>Degrees</td> 
+        </tr>
+        <tr>
+          <td>Longitude of ascending node:</td>
+          <td><input type="text" id="textLongitudeOfAscendingNode"></td> 
+          <td>Degrees</td> 
+        </tr>
+        <tr>
+          <td>Argument of periapsis:</td>
+          <td><input type="text" id="textArgumentOfPeriapsis"></td> 
+          <td>Degrees</td> 
+        </tr>
+        <tr>
+          <td>True anomaly at epoch:</td>
+          <td><input type="text" id="textTrueAnomaly"></td> 
+          <td>Degrees</td> 
+        </tr>
+        <tr>
+          <td>Tilt:</td>
+          <td><input type="text" id="textTilt" onchange="External.ChangeTilt()"></td> 
+          <td>Degrees</td>
+        </tr>
+        <tr>
+          <td>Orientation:</td>
+          <td><input type="text" id="textOrientation" onchange="External.ChangeOrientation()"></td> 
+          <td>Degrees</td>
+        </tr>
+        <!--
+        <tr>
+          <td>X:</td>
+          <td><input type="text" id="textX"></td> 
+        </tr>
+        <tr>
+          <td>Y:</td>
+          <td><input type="text" id="textY"></td> 
+        </tr>
+        <tr>
+          <td>Z:</td>
+          <td><input type="text" id="textZ"></td> 
+        </tr>
+      
+        <tr>
+          <td>Velocity X:</td>
+          <td><input type="text" id="textVX"></td> 
+        </tr>
+        <tr>
+          <td>Velocity Y:</td>
+          <td><input type="text" id="textVY"></td> 
+        </tr>
+        <tr>
+          <td>Velocity Z:</td>
+          <td><input type="text" id="textVZ"></td> 
+        </tr>
+      -->
+    
+      </table>
+    
+      <button type="button" class="button" id="bDelete">Delete</button>
+      
+    
+      
+    </div>
+  
+    <div class="menu controls" id="controls">
+      <div style="text-align: center;">
+        <button type="button" class="toggle" id="bControls" onclick="External.ToggleControls()">Controls</button>
+      </div>
+      <br>Left mouse click and drag or use touch to pan around centered object.
+      <p> Double click on a object to center on it.
+    </div>
+	  
+
+    
+    <div id="navigation">
+      <!--
+      <button type="button" id="bZoomIn">+</button>
+      <p><button type="button" id="bZoomOut">-</button>
+      -->
+      <div style="text-align: center;">
+        Zoom
+        <button type="button" class="button" id="bZoomIn">+</button>
+        <p>
+        <button type="button" class="button" id="bZoomOut">-</button>
+        <p>
+        <button type="button" class="button" id="bAdd" onclick="External.AddObject()">Add</button>
+        <p>
+        <button type="button" class="button" id="bEdit">Edit</button>
+        <p>
+      </div>
+      Speed: 
+      <br><input type="range" id="timeslider" value="0" min="0" max = "24">
+      <div id="displayinfo">
+      
+      </div>
+    </div>
+    <canvas id="canvas" >
+			Your browser does not support the canvas element. Please upgrade to the latest version of your browser or use the latest Firefox, Google Chrome, Safari or Internet Explorer.
+		</canvas>
+		
+	</body>
+</html>
+
