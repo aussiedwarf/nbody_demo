@@ -92,6 +92,12 @@ input[type=checkbox]:checked + label:before {
   
   appearance: none;
 
+  -webkit-user-select: none;
+  -khtml-user-select: none;
+  -moz-user-select: none;
+  -o-user-select: none;
+  user-select: none;
+
   /*
   -webkit-box-shadow: 0 8px 0 #3f3f3f;
   -moz-box-shadow: 0 8px 0 #3f3f3f;
